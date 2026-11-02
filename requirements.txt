@@ -1,0 +1,4 @@
+python-telegram-bot>=21,<22
+python-dotenv>=1.0
+tzdata
+segno>=1.5   # QR کد (پایتون خالص)؛ اختیاری: نبودنش ربات را متوقف نمی‌کند

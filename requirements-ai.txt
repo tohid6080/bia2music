@@ -1,0 +1,3 @@
+-r requirements.txt
+# اختیاری: SDK رسمی (روی سرور). بدون آن، اتصال مستقیم HTTP با httpx استفاده می‌شود.
+anthropic>=1.0

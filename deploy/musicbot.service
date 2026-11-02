@@ -1,0 +1,19 @@
+# نمونه‌ی سرویس systemd برای اجرای شبانه‌روزی روی سرور (Ubuntu)
+# نصب: sudo cp deploy/musicbot.service /etc/systemd/system/ && sudo systemctl enable --now musicbot
+[Unit]
+Description=Bia2Music assistant bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=musicbot
+WorkingDirectory=/opt/ai-music-manager
+ExecStart=/opt/ai-music-manager/.venv/bin/python -m musicbot
+Restart=always
+RestartSec=5
+# .env فقط برای کاربر musicbot خواناست: chmod 600 /opt/ai-music-manager/.env
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
