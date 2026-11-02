@@ -1,0 +1,3 @@
+# فقط برای استقرار روی PostgreSQL (DATABASE_URL=postgresql://...)
+-r requirements.txt
+psycopg[binary]>=3.1

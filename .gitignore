@@ -7,3 +7,10 @@ data/
 logs/
 *.db
 *.sqlite3
+
+# --- Bia2Music Mini App ---
+node_modules/
+webapp/dist/
+*.local
+backend/.env
+backend/data/
