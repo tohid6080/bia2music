@@ -612,12 +612,71 @@ class UserDataRepo:
     def count_new_requests(self) -> int:
         return self.db.fetchone("SELECT COUNT(*) c FROM song_requests WHERE status='new'")["c"]
 
+    # --- فعالیت داخل ربات (رضایت جداگانه؛ پیش‌فرض خاموش) ---
+    EVENT_KINDS = ("view", "like", "download")
+    EVENT_KEEP_DAYS = 90
+    VIEW_DEDUPE_MINUTES = 10
+
+    def has_activity_consent(self, uid: int) -> bool:
+        row = self.db.fetchone("SELECT activity_consent_at FROM users WHERE telegram_user_id=?", (uid,))
+        return bool(row and row["activity_consent_at"])
+
+    def set_activity_consent(self, uid: int, on: bool) -> None:
+        """خاموش‌کردن، همه‌ی سابقه‌ی فعالیت همان کاربر را هم پاک می‌کند."""
+        with self.db._lock:
+            if on:
+                self.db._conn.execute("UPDATE users SET activity_consent_at=strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE telegram_user_id=?", (uid,))
+            else:
+                self.db._conn.execute("UPDATE users SET activity_consent_at=NULL WHERE telegram_user_id=?", (uid,))
+                self.db._conn.execute("DELETE FROM song_events WHERE telegram_user_id=?", (uid,))
+            self.db._conn.commit()
+
+    def record_event(self, uid: int, song_id: int, kind: str) -> bool:
+        """فقط اگر کاربر رضایت فعالیت داده باشد ثبت می‌شود. بازدید تکراریِ نزدیک به هم ثبت نمی‌شود."""
+        if kind not in self.EVENT_KINDS:
+            raise ValueError("kind")
+        with self.db._lock:
+            ok = self.db._conn.execute("SELECT 1 FROM users WHERE telegram_user_id=? AND activity_consent_at IS NOT NULL", (uid,)).fetchone()
+            if not ok:
+                return False
+            if kind == "view" and self.db._conn.execute(
+                    "SELECT 1 FROM song_events WHERE telegram_user_id=? AND song_id=? AND kind='view' AND at>=strftime('%Y-%m-%dT%H:%M:%SZ','now',?)",
+                    (uid, song_id, f"-{self.VIEW_DEDUPE_MINUTES} minutes")).fetchone():
+                return False
+            self.db._conn.execute("INSERT INTO song_events(telegram_user_id,song_id,kind) VALUES (?,?,?)", (uid, song_id, kind))
+            self.db._conn.commit()
+            return True
+
+    def purge_old_events(self) -> int:
+        cur = self.db.execute("DELETE FROM song_events WHERE at < strftime('%Y-%m-%dT%H:%M:%SZ','now',?)", (f"-{self.EVENT_KEEP_DAYS} days",))
+        return cur.rowcount
+
+    def activity_consent_count(self) -> int:
+        return self.db.fetchone("SELECT COUNT(*) c FROM users WHERE activity_consent_at IS NOT NULL")["c"]
+
+    def event_songs(self, limit: int = 10, offset: int = 0) -> list[dict]:
+        rows = self.db.fetchall(
+            "SELECT s.id, s.title, s.artist, s.status, COUNT(DISTINCT CASE WHEN e.kind='view' THEN e.telegram_user_id END) viewers, "
+            "SUM(e.kind='like') likes, SUM(e.kind='download') downloads, MAX(e.at) last_at "
+            "FROM song_events e JOIN songs s ON s.id=e.song_id GROUP BY s.id ORDER BY last_at DESC LIMIT ? OFFSET ?", (limit, offset))
+        return [dict(r) for r in rows]
+
+    def event_song_count(self) -> int:
+        return self.db.fetchone("SELECT COUNT(DISTINCT song_id) c FROM song_events")["c"]
+
+    def event_people(self, song_id: int, limit: int = 30) -> list[dict]:
+        rows = self.db.fetchall(
+            "SELECT u.telegram_user_id, u.first_name, u.username, GROUP_CONCAT(DISTINCT e.kind) kinds, MAX(e.at) last_at, COUNT(*) n "
+            "FROM song_events e JOIN users u ON u.telegram_user_id=e.telegram_user_id WHERE e.song_id=? "
+            "GROUP BY u.telegram_user_id ORDER BY last_at DESC LIMIT ?", (song_id, limit))
+        return [dict(r) for r in rows]
+
     # --- حذف کامل اطلاعات کاربر ---
     def delete_all(self, uid: int) -> None:
         with self.db._lock:
-            for table in ("user_interests", "song_likes", "song_requests"):
+            for table in ("user_interests", "song_likes", "song_requests", "song_events"):
                 self.db._conn.execute(f"DELETE FROM {table} WHERE telegram_user_id=?", (uid,))
-            self.db._conn.execute("UPDATE users SET consent_at=NULL, username=NULL, first_name=NULL WHERE telegram_user_id=?", (uid,))
+            self.db._conn.execute("UPDATE users SET consent_at=NULL, activity_consent_at=NULL, username=NULL, first_name=NULL WHERE telegram_user_id=?", (uid,))
             self.db._conn.commit()
 
 

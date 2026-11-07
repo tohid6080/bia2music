@@ -50,8 +50,8 @@ def test_send_targets_are_pinned():
         for call in _send_calls(f, "send_message"):
             assert "channel" not in _target(call).lower(), (f, ast.unparse(call))
         for attr in ("send_audio", "send_document", "send_photo", "send_voice", "send_video"):
-            if (attr == "send_document" and f.name == "settings.py") or (attr == "send_photo" and f.name == "growth.py"):
-                assert all("admin_user_id" in _target(c) for c in _send_calls(f, attr))   # پشتیبان و QR فقط به چت مدیر
+            if (attr == "send_document" and f.name in ("settings.py", "persist.py")) or (attr == "send_photo" and f.name == "growth.py"):
+                assert all("admin_user_id" in _target(c) for c in _send_calls(f, attr))   # پشتیبان (دستی و خودکار) و QR فقط به چت مدیر
             else:
                 assert not _send_calls(f, attr), (f, attr)
 
@@ -164,3 +164,14 @@ def test_channel_post_edits_confined_to_promo_backfill():
     calls = _send_calls(SRC / "promo_backfill.py", "edit_message_reply_markup")
     assert len(calls) == 1 and _target(calls[0]) == "self.channel_ref"
     assert "edit_message_text" not in (SRC / "promo_backfill.py").read_text()
+
+
+def test_auto_backup_only_touches_admin_chat():
+    """پشتیبان خودکار فقط get_chat/send_document/pin/delete روی چت مدیر؛ هیچ مقصد دیگری."""
+    tree = ast.parse((SRC / "persist.py").read_text())
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Call) and getattr(n.func, "attr", "") in ("get_chat", "send_document", "pin_chat_message", "delete_message"):
+            target = ast.unparse(n.args[0]) if n.args else next(ast.unparse(k.value) for k in n.keywords if k.arg == "chat_id")
+            assert target in ("self.settings.admin_user_id", "settings.admin_user_id"), ast.unparse(n)
+    text = (SRC / "persist.py").read_text()
+    assert "send_message" not in text and "forward_message" not in text

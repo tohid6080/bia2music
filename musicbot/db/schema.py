@@ -421,3 +421,21 @@ CREATE TABLE IF NOT EXISTS promo_applied (
 """
 
 MIGRATIONS[9] = SCHEMA_V9
+
+
+# مرحله ۱۱: فعالیت کاربران داخل ربات (فقط با رضایت جداگانه‌ی خودِ کاربر؛ پیش‌فرض خاموش)
+SCHEMA_V10 = """
+ALTER TABLE users ADD COLUMN activity_consent_at TEXT;
+
+CREATE TABLE IF NOT EXISTS song_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    telegram_user_id INTEGER NOT NULL,
+    song_id INTEGER NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL CHECK (kind IN ('view','like','download')),
+    at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+);
+CREATE INDEX IF NOT EXISTS idx_events_song ON song_events(song_id, at);
+CREATE INDEX IF NOT EXISTS idx_events_user ON song_events(telegram_user_id);
+"""
+
+MIGRATIONS[10] = SCHEMA_V10

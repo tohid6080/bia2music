@@ -34,7 +34,7 @@ async def show_users_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     )
     kb = InlineKeyboardMarkup([
         [_b("👥 کاربران اخیر", "a:ul"), _b("📊 علایق مخاطبان", "a:int")],
-        [_b(f"📨 درخواست‌ها ({new_req})", "a:rq")],
+        [_b(f"📨 درخواست‌ها ({new_req})", "a:rq"), _b("👁 فعالیت آهنگ‌ها", "a:ev:0")],
         [_b("👤 نمای کاربر (آزمایش)", "u:home")],
         [_b(T.BTN_BACK, "m:main")],
     ])
@@ -103,6 +103,10 @@ async def admin_users_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             await _user_panel(update, context, target)
         elif action == "int":
             await _interests_stats(update, context)
+        elif action == "ev":
+            await _events(update, context, int(parts[2]))
+        elif action == "evs":
+            await _event_song(update, context, int(parts[2]))
         elif action == "rq":
             await _requests(update, context)
         elif action in ("rd", "rx"):
@@ -147,6 +151,50 @@ async def _interests_stats(update, context) -> None:
     if not any_data:
         lines.append("هنوز کسی علایقی ثبت نکرده است.")
     await show(update, "\n".join(lines), InlineKeyboardMarkup([[_b(T.BTN_BACK, "m:users")]]))
+
+
+EV_PAGE = 8
+KIND_FA = {"view": "باز کرد", "like": "پسندید", "download": "دریافت کرد"}
+
+
+async def _events(update, context, page: int) -> None:
+    """فعالیت داخل ربات فقط از کاربرانی که خودشان اجازه داده‌اند. بازدید/پخش داخل کانال از تلگرام قابل دریافت نیست."""
+    ctx = ctx_of(context)
+    ud = ctx.repos.userdata
+    ud.purge_old_events()
+    total = ud.event_song_count()
+    head = ("👁 <b>فعالیت آهنگ‌ها در ربات</b>\n"
+            f"کاربران دارای اجازه‌ی نمایش فعالیت: {ud.activity_consent_count()}\n"
+            "ℹ️ فقط کارهای انجام‌شده <b>داخل ربات</b> و فقط از کسانی که خودشان اجازه داده‌اند. تلگرام نمی‌گوید چه کسی داخل کانال "
+            "پست را دیده یا پخش کرده؛ آن آمار برای هیچ ربات یا مدیری در دسترس نیست.\n")
+    songs = ud.event_songs(EV_PAGE, page * EV_PAGE)
+    if not songs:
+        await show(update, head + "\nهنوز فعالیتی ثبت نشده است.", InlineKeyboardMarkup([[_b(T.BTN_BACK, "m:users")]]))
+        return
+    rows = [[_b(f"{song_label(s, 24)} · 👁{s['viewers']} ❤️{s['likes'] or 0} 📥{s['downloads'] or 0}", f"a:evs:{s['id']}")] for s in songs]
+    nav = []
+    if page > 0:
+        nav.append(_b("⬅️", f"a:ev:{page - 1}"))
+    if (page + 1) * EV_PAGE < total:
+        nav.append(_b("➡️", f"a:ev:{page + 1}"))
+    if nav:
+        rows.append(nav)
+    rows.append([_b(T.BTN_BACK, "m:users")])
+    await show(update, head + "\nیک آهنگ را بزنید تا نام‌ها را ببینید:", InlineKeyboardMarkup(rows))
+
+
+async def _event_song(update, context, song_id: int) -> None:
+    ctx = ctx_of(context)
+    song = ctx.repos.songs.get(song_id)
+    people = ctx.repos.userdata.event_people(song_id)
+    title = esc(song_label(song, 40)) if song else f"#{song_id}"
+    lines = [f"👁 <b>{title}</b>\n(فقط کسانی که اجازه‌ی نمایش فعالیت داده‌اند)\n"]
+    for p in people:
+        kinds = "، ".join(KIND_FA.get(k, k) for k in sorted((p["kinds"] or "").split(",")))
+        lines.append(f"• {_name(p)} — {kinds} ({esc((p['last_at'] or '')[:10])})")
+    if not people:
+        lines.append("هنوز کسی ثبت نشده است.")
+    await show(update, "\n".join(lines)[:3900], InlineKeyboardMarkup([[_b(T.BTN_BACK, "a:ev:0")]]))
 
 
 async def _requests(update, context) -> None:

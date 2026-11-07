@@ -1,0 +1,15 @@
+.git
+.venv
+.env
+.env.*
+data
+logs
+tests
+backend
+webapp
+docs
+deploy
+*.zip
+**/__pycache__
+.pytest_cache
+node_modules

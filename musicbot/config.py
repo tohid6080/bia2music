@@ -30,6 +30,9 @@ class Settings:
     openai_api_key: Optional[str] = field(default=None, repr=False)
     youtube_api_key: Optional[str] = field(default=None, repr=False)
     lastfm_api_key: Optional[str] = field(default=None, repr=False)
+    webhook_url: Optional[str] = None          # آدرس HTTPS عمومی سرویس (حالت وب‌هوک؛ برای میزبان‌هایی که می‌خوابند)
+    port: int = 8080
+    telegram_backup: bool = False              # پشتیبان خودکار پین‌شده برای مدیر (بازیابی پس از پاک‌شدن دیسک)
 
     @property
     def tz(self) -> ZoneInfo:
@@ -79,6 +82,14 @@ def load_settings(env: Optional[Mapping[str, str]] = None, *, load_dotenv_file: 
         raise ConfigError("LOG_LEVEL نامعتبر است. یکی از DEBUG/INFO/WARNING/ERROR/CRITICAL.")
 
     ai_provider = (_get(env, "AI_PROVIDER") or "none").lower()
+    webhook_url = (_get(env, "WEBHOOK_URL") or "").rstrip("/") or None
+    if webhook_url and not webhook_url.startswith("https://"):
+        raise ConfigError("WEBHOOK_URL باید با https:// شروع شود.")
+    try:
+        port = int(_get(env, "PORT") or "8080")
+    except ValueError:
+        raise ConfigError("PORT باید عدد باشد.") from None
+    backup_raw = (_get(env, "TELEGRAM_BACKUP") or ("1" if webhook_url else "0")).lower()
 
     return Settings(
         bot_token=token,
@@ -93,4 +104,7 @@ def load_settings(env: Optional[Mapping[str, str]] = None, *, load_dotenv_file: 
         openai_api_key=_get(env, "OPENAI_API_KEY"),
         youtube_api_key=_get(env, "YOUTUBE_API_KEY"),
         lastfm_api_key=_get(env, "LASTFM_API_KEY"),
+        webhook_url=webhook_url,
+        port=port,
+        telegram_backup=backup_raw in ("1", "true", "yes", "on"),
     )

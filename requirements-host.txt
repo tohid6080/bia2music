@@ -1,0 +1,4 @@
+# برای اجرای ابری/Docker (حالت وب‌هوک). روی Termux لازم نیست.
+-r requirements.txt
+python-telegram-bot[webhooks]>=21.0
+tzdata

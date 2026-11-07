@@ -136,6 +136,17 @@ async def _dispatch(update, context, ctx, uid: int, action: str, parts: list[str
             raise ValueError("ref")
         ctx.repos.userdata.toggle_interest(uid, kind, ref)
         await _interest_picker(update, context, uid, dim)
+    elif action == "ac":
+        on = ctx.repos.userdata.has_activity_consent(uid)
+        await show(update, UU.ACTIVITY_INFO + f"\n\nوضعیت فعلی: {'✅ روشن' if on else '⛔ خاموش'}", UU.activity_keyboard(on))
+    elif action in ("acy", "acn"):
+        if action == "acy" and not ctx.repos.userdata.has_consent(uid):
+            await show(update, UU.CONSENT, UU.consent_keyboard(0))        # ابتدا رضایت پایه‌ی ثبت اطلاعات
+            return
+        ctx.repos.userdata.set_activity_consent(uid, action == "acy")
+        ctx.repos.logs.add("activity_consent_on" if action == "acy" else "activity_consent_off", uid)
+        await show(update, UU.ACTIVITY_INFO + f"\n\nوضعیت فعلی: {'✅ روشن' if action == 'acy' else '⛔ خاموش (سابقه پاک شد)'}",
+                   UU.activity_keyboard(action == "acy"))
     elif action == "dx":
         await show(update, "🗑 همه‌ی علایق، پسندها و درخواست‌های شما حذف شود؟ این کار قابل بازگشت نیست.", UU.delete_confirm())
     elif action == "dy":
@@ -206,6 +217,7 @@ async def _song(update, context, song_id: int, note: str = "") -> None:
         return
     ud = ctx.repos.userdata
     ctx.repos.metrics.incr("song_view")
+    ud.record_event(update.effective_user.id, song_id, "view")
     download = premium_settings(ctx)["enabled"] and bool(song.get("telegram_file_id"))
     await show(update, UU.song_text(song, ud.like_count(song_id)) + (f"\n\n{note}" if note else ""),
                UU.song_keyboard(song, ud.is_liked(update.effective_user.id, song_id), download))
@@ -221,6 +233,7 @@ async def _like(update, context, uid: int, song_id: int) -> None:
         return
     if ctx.repos.userdata.toggle_like(uid, song_id):
         ctx.repos.metrics.incr("like")
+        ctx.repos.userdata.record_event(uid, song_id, "like")
     await _song(update, context, song_id)
 
 
@@ -396,4 +409,5 @@ async def _download(update, context, uid: int, song_id: int) -> None:
     ok = await send_song_to_user(context.bot, uid, song)
     if ok:
         ctx.repos.metrics.incr("download")
+        ctx.repos.userdata.record_event(uid, song_id, "download")
     await _song(update, context, song_id, "📥 فایل ارسال شد." if ok else "⚠️ ارسال فایل ممکن نشد؛ کمی بعد دوباره تلاش کنید.")

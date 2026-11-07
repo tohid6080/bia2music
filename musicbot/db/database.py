@@ -36,6 +36,11 @@ class Database:
         with self._lock:
             return self._conn.execute(sql, tuple(params)).fetchall()
 
+    @property
+    def total_changes(self) -> int:
+        with self._lock:
+            return self._conn.total_changes
+
     def backup(self, dest_path: str) -> None:
         """نسخه‌ی کاملاً سازگار از دیتابیس (حتی هنگام اجرا) در فایل مقصد."""
         import sqlite3

@@ -75,10 +75,21 @@ async def _post_init(app: Application) -> None:
         log.warning("CHANNEL_ID تنظیم نشده است؛ از منوی تنظیمات کانال را مشخص کنید.")
     # زمان‌بند فقط یادآوری می‌فرستد؛ هیچ‌چیز را منتشر نمی‌کند.
     app.bot_data["scheduler_task"] = asyncio.create_task(run_scheduler(ctx, app.bot))
+    if ctx.settings.telegram_backup:
+        from musicbot.persist import TelegramBackup, backup_loop
+
+        app.bot_data["tg_backup"] = TelegramBackup(app.bot, ctx.repos, ctx.settings)
+        app.bot_data["backup_task"] = asyncio.create_task(backup_loop(app.bot_data["tg_backup"]))
 
 
 async def _post_shutdown(app: Application) -> None:
-    tasks = [app.bot_data.get("scheduler_task")]
+    backup = app.bot_data.get("tg_backup")
+    if backup:                                          # آخرین تغییرات قبل از خاموشی/خواب میزبان
+        try:
+            await asyncio.wait_for(backup.maybe_backup(final=True), timeout=8)
+        except Exception:  # noqa: BLE001
+            log.warning("پشتیبان نهایی انجام نشد")
+    tasks = [app.bot_data.get("scheduler_task"), app.bot_data.get("backup_task")]
     if app.bot_data.get("app_ctx") and app.bot_data["app_ctx"].radar is not None:
         await app.bot_data["app_ctx"].radar.aclose()
     for key in ("import_job", "ai_job", "promo_job"):
@@ -117,6 +128,19 @@ def build_application(settings: Settings, db: Database | None = None) -> Applica
     return app
 
 
+def _restore_before_start(settings: Settings) -> None:
+    """اگر فایل دیتابیس نیست (دیسک موقت پاک شده)، از آخرین پشتیبان پین‌شده‌ی چت مدیر بازیابی می‌کند."""
+    from telegram import Bot
+
+    from musicbot.persist import restore_if_missing
+
+    async def run() -> str:
+        async with Bot(settings.bot_token) as bot:
+            return await restore_if_missing(bot, settings)
+
+    log.info("restore check: %s", asyncio.run(run()))
+
+
 def main() -> None:
     try:
         settings = load_settings()
@@ -126,6 +150,17 @@ def main() -> None:
     setup_logging(settings.log_level)
     status = get_ai_status(settings)
     log.info("AI real active=%s provider=%s", status.real_ai_active, status.active_provider)
+    if settings.telegram_backup:
+        _restore_before_start(settings)
     app = build_application(settings)
-    app.run_polling(allowed_updates=[Update.MESSAGE, Update.CALLBACK_QUERY, Update.PRE_CHECKOUT_QUERY, Update.MESSAGE_REACTION_COUNT,
-                         Update.CHAT_MEMBER], drop_pending_updates=True)
+    allowed = [Update.MESSAGE, Update.CALLBACK_QUERY, Update.PRE_CHECKOUT_QUERY, Update.MESSAGE_REACTION_COUNT, Update.CHAT_MEMBER]
+    if settings.webhook_url:
+        import hashlib
+
+        h = lambda salt: hashlib.sha256(f"{salt}:{settings.bot_token}".encode()).hexdigest()  # noqa: E731
+        path = h("path")[:40]                         # مسیر و secret_token از توکن مشتق می‌شوند؛ نیازی به متغیر محیطی اضافه نیست
+        log.info("Webhook mode on port %s", settings.port)
+        app.run_webhook(listen="0.0.0.0", port=settings.port, url_path=path, webhook_url=f"{settings.webhook_url}/{path}",
+                        secret_token=h("secret")[:48], allowed_updates=allowed, drop_pending_updates=False)
+    else:
+        app.run_polling(allowed_updates=allowed, drop_pending_updates=True)
